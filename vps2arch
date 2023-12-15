@@ -60,7 +60,10 @@ download_and_extract_bootstrap() {
 	rm -f "$filename"
 
 	if grep -E '^nameserver\s+127\.' /etc/resolv.conf > /dev/null; then
-		echo "nameserver 8.8.8.8" > "/root.$cpu_type/etc/resolv.conf"
+		echo "nameserver 8.8.8.8
+nameserver 1.1.1.1
+nameserver 2001:4860:4860::8888
+nameserver 2606:4700:4700::1111" > "/root.$cpu_type/etc/resolv.conf"
 	else
 		cp -L /etc/resolv.conf "/root.$cpu_type/etc"
 	fi
@@ -132,7 +135,7 @@ delete_all() {
 }
 
 install_packages() {
-	local packages="base linux lvm2 openssh reflector vim"
+	local packages="base linux openssh vim"
 	[ "$bootloader" != "none" ] && packages="$packages $bootloader"
 	# XXX Install gptdisk for syslinux. To be removed then FS#45029 will be closed
 	[ "$bootloader" = "syslinux" ] && packages="$packages gptfdisk"
@@ -283,16 +286,12 @@ finalize() {
 	# Enable SSH login for user root (#3)
 	sed -i '/^#PermitRootLogin\s/s/.*/&\nPermitRootLogin yes/' /etc/ssh/sshd_config
 	
-	# Run reflector to get updated mirrors
+	# 不使用reflector
+	echo -n "" > /etc/pacman.d/mirrorlist
+	for x in $mirrors; do
+		echo "Server = ${x}\$repo/os/\$arch" >> /etc/pacman.d/mirrorlist
+	done
 	
-	cat <<-EOF
-	
-		Reflector: Rating the 35 most recently synced HTTPS servers, sorting them by download speed
-		
-	EOF
-	
-	reflector -l 35 -p https --sort rate --save /etc/pacman.d/mirrorlist
-
 	cat <<-EOF
 		Hi,
 		your VM has successfully been reimaged with Arch Linux.
@@ -357,7 +356,7 @@ while getopts ":b:m:n:h" opt; do
 done
 shift $((OPTIND - 1))
 
-[ -z "$mirrors" ] && mirrors=$(get_mirrors)
+[ -z "$mirrors" ] && mirrors=$(get_mirrors "${2}")
 
 
 if is_openvz; then
@@ -366,6 +365,25 @@ if is_openvz; then
 elif is_lxc; then
 	bootloader=none
 fi
+
+init_system() {
+	# 设置主机名
+	echo "${1:-arch}" > /etc/hostname
+	# 设置上海时区
+	ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
+	# 设置locale本地化
+	sed -i 's|#en_US.UTF-8|en_US.UTF-8|g' /etc/locale.gen
+	locale-gen
+	echo 'LANG=en_US.UTF-8'  > /etc/locale.conf
+	# pacman
+	sed -i 's|#Color|Color|g' /etc/pacman.conf
+	# 设置hosts
+	cat >> /etc/hosts <<EOF
+127.0.0.1	localhost
+::1		localhost
+127.0.1.1	${1:-arch}
+EOF
+}
 
 cd /
 download_and_extract_bootstrap
@@ -379,3 +397,4 @@ cleanup
 configure_bootloader
 configure_network
 finalize
+init_system "$1"
